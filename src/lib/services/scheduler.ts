@@ -8,6 +8,8 @@ import { runDeduplication } from './deduplicator';
 import { cache } from './cache';
 import { db } from '@/lib/db';
 import type { ScrapeResult } from '@/lib/types';
+import { spawn } from 'child_process';
+import path from 'path';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -142,6 +144,14 @@ export class Scheduler {
       // Step 1: Scrape
       const scrapeResults = await this.runScrapeStep();
 
+      // Step 1b: Playwright scrape (Cloudflare-protected sources)
+      // Does NOT touch Letgo — Letgo already handled by step 1
+      try {
+        await this.runPlaywrightScrape();
+      } catch (e) {
+        console.error('[Scheduler] Playwright scrape failed:', e);
+      }
+
       // Step 2: Valuation
       let valuationUpdated = 0;
       const activeConfig = this.configs.find(c => c.enabled);
@@ -215,6 +225,35 @@ export class Scheduler {
     } finally {
       this.isRunning = false;
     }
+  }
+
+  /** Run Playwright scraper for SPA/WAF-protected sources.
+   *  Letgo verisine dokunmaz — farklı sourceName ile ayrı kayıtlar ekler. */
+  private async runPlaywrightScrape(): Promise<void> {
+    const scriptPath = path.join(process.cwd(), 'scripts', 'playwright-scrape.ts');
+    const args = ['run', scriptPath, '--site=all', '--pages=1', '--max=50'];
+
+    console.log('[Scheduler] Running Playwright scrape (arabam/vavacars/sahibinden)...');
+    await new Promise<void>((resolve) => {
+      const proc = spawn('bun', args, {
+        cwd: process.cwd(),
+        env: { ...process.env },
+        stdio: 'pipe',
+      });
+      let stderr = '';
+      proc.stderr?.on('data', (d) => (stderr += d.toString()));
+      proc.on('close', (code) => {
+        if (code !== 0) {
+          console.warn(`[Scheduler] Playwright scrape exited with code ${code}`);
+          if (stderr) console.warn(`[Scheduler] stderr (last 500 chars): ${stderr.slice(-500)}`);
+        }
+        resolve();
+      });
+      proc.on('error', (err) => {
+        console.warn(`[Scheduler] Playwright spawn error: ${err.message}`);
+        resolve();
+      });
+    });
   }
 
   /** Run scraping for configured sources */

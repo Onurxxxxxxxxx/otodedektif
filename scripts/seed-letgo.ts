@@ -14,11 +14,11 @@ async function main() {
   console.log('  AracıKıyas - Letgo Real Data Seed');
   console.log('═══════════════════════════════════════════════════════\n');
 
-  // ── Step 1: Scrape Letgo (single page, ~26 listings) ────────────────
-  console.log('🔍 Step 1: Scraping Letgo...');
+  // ── Step 1: Scrape Letgo (multiple categories, ~150 listings) ───────
+  console.log('🔍 Step 1: Scraping Letgo (multiple categories)...');
   const adapter = new LetgoAdapter();
   const t0 = Date.now();
-  const result = await adapter.search({ limit: 50 });
+  const result = await adapter.search({ limit: 500 });
   console.log(`   ✓ Done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(`   Found: ${result.totalFound} listings\n`);
 
@@ -118,7 +118,7 @@ async function main() {
         endTime: new Date(),
         status: 'success',
         itemsFound: result.totalFound,
-        itemsSaved,
+        itemsSaved: saved,
         durationMs: Date.now() - t0,
       },
     });

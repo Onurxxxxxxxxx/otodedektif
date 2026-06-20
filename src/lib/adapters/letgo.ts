@@ -5,12 +5,15 @@ import * as cheerio from 'cheerio';
 /**
  * Letgo Adapter — Gerçek scraping ile çalışan adapter.
  * Letgo, cheerio ile parse edilebilen SSR HTML döndürür.
- * URL: https://www.letgo.com/arabalar_c15706
+ *
+ * Tek URL tüm Türkiye için aynı 26 ilanı döndürür, bu yüzden
+ * kategori bazlı (sedan, hatchback, suv, arazi, mpv, klasik) scrape
+ * yapar ve her kategoriden farklı ilanlar toplar.
  */
 export class LetgoAdapter extends BaseAdapter {
   sourceName = 'letgo';
   baseUrl = 'https://www.letgo.com';
-  defaultDelay = 2500;
+  defaultDelay = 2000;
   maxConcurrency = 3;
 
   private rateLimiter = getRateLimiter({
@@ -20,11 +23,18 @@ export class LetgoAdapter extends BaseAdapter {
   });
 
   /**
-   * Letgo SSR HTML returns the same ~26 listings for any path / offset,
-   * so multiple page fetches waste time without yielding new data.
-   * Setting MAX_PAGES = 1 means we grab the SSR snapshot once.
+   * Letgo alt kategorileri — her biri farklı ilan seti döndürür.
+   * Ana sayfa + 6 alt kategori = ~150+ unique ilan.
    */
-  private readonly MAX_PAGES = 1;
+  private readonly CATEGORY_PATHS = [
+    '/arabalar_c15706',           // Ana kategori
+    '/otomobil-suv_c15711',       // SUV
+    '/sedan-araba_c15712',        // Sedan
+    '/hatchback-araba_c15713',    // Hatchback
+    '/arazi-araci_c15714',        // Arazi
+    '/mpv-minivan_c15717',        // MPV/Minivan
+    '/klasik-araba_c15718',       // Klasik
+  ];
 
   async search(filters: SearchFilters): Promise<AdapterResult> {
     const startTime = Date.now();
@@ -36,56 +46,41 @@ export class LetgoAdapter extends BaseAdapter {
     };
 
     const allListings: ListingRaw[] = [];
+    const seenUrls = new Set<string>();
 
     try {
-      // Scrape multiple pages for more listings
-      const maxPages = filters.limit ? Math.ceil(filters.limit / 26) : this.MAX_PAGES;
-      const startPage = filters.page || 1;
-
-      for (let pageIdx = 0; pageIdx < maxPages; pageIdx++) {
-        const currentPage = startPage + pageIdx;
-        const offset = (currentPage - 1) * 26;
-
+      for (const path of this.CATEGORY_PATHS) {
         await this.rateLimiter.wait();
 
-        // Build URL — Letgo uses category-based browsing
-        let url = `${this.baseUrl}/arabalar_c15706`;
-        const params = new URLSearchParams();
-
-        if (filters.priceMin) params.set('price_min', filters.priceMin.toString());
-        if (filters.priceMax) params.set('price_max', filters.priceMax.toString());
-        if (offset > 0) params.set('offset', offset.toString());
-
-        // Letgo search query
-        if (filters.make) {
-          const query = [filters.make, filters.model].filter(Boolean).join(' ');
-          params.set('q', query);
-        }
-
-        const qs = params.toString();
-        const fullUrl = qs ? `${url}?${qs}` : url;
-
-        this.log(`Scraping page ${currentPage}: ${fullUrl}`);
+        const url = `${this.baseUrl}${path}`;
+        this.log(`Scraping ${path}`);
 
         try {
-          const html = await this.fetchWithPoliteness(fullUrl);
+          const html = await this.fetchWithPoliteness(url);
           const pageListings = this.parseListingsHtml(html);
 
-          if (pageListings.length === 0) {
-            this.log(`No more listings on page ${currentPage}, stopping.`);
+          // Dedup by sourceUrl
+          let added = 0;
+          for (const l of pageListings) {
+            if (l.sourceUrl && !seenUrls.has(l.sourceUrl)) {
+              seenUrls.add(l.sourceUrl);
+              allListings.push(l);
+              added++;
+            }
+          }
+
+          this.log(`  ${path}: ${pageListings.length} parsed, ${added} new (total: ${allListings.length})`);
+
+          // Respect filters.limit
+          if (filters.limit && allListings.length >= filters.limit) {
             break;
           }
 
-          allListings.push(...pageListings);
-          this.log(`Page ${currentPage}: ${pageListings.length} listings (total: ${allListings.length})`);
-
-          // Be polite — wait between pages
-          if (pageIdx < maxPages - 1) {
-            await new Promise(r => setTimeout(r, this.defaultDelay));
-          }
+          // Be polite — wait between categories
+          await new Promise((r) => setTimeout(r, this.defaultDelay));
         } catch (error: any) {
-          this.log(`Page ${currentPage} failed: ${error.message}`, 'warn');
-          // Continue to next page even if one fails
+          this.log(`  ${path} failed: ${error.message}`, 'warn');
+          // Continue to next category even if one fails
         }
       }
 
@@ -126,6 +121,18 @@ export class LetgoAdapter extends BaseAdapter {
         const rawMake = parts[0] || '';
         const rawModel = parts.slice(1).join(' ') || '';
 
+        // Skip non-listing items (logos, badges, icons)
+        if (
+          !rawMake ||
+          rawMake === 'Letgo' ||
+          titleStr.includes('Logo') ||
+          titleStr.includes('Icon') ||
+          titleStr.includes('Damgası') ||
+          titleStr === 'chevron-down'
+        ) {
+          return;
+        }
+
         // Price — pattern: "485.000 TL" or "1.250.000 TL"
         const priceMatch = allText.match(/([0-9]{1,3}(\.[0-9]{3})+)\s*TL/);
         let price = 0;
@@ -144,26 +151,28 @@ export class LetgoAdapter extends BaseAdapter {
 
         // City
         const cityMatch = allText.match(
-          /(İstanbul|Ankara|İzmir|Bursa|Antalya|Adana|Konya|Gaziantep|Mersin|Kayseri|Eskişehir|Samsun|Denizli|Trabzon|Muğla|Aydın|Balıkesir|Malatya|Erzurum|Diyarbakır)/,
+          /(İstanbul|Ankara|İzmir|Bursa|Antalya|Adana|Konya|Gaziantep|Mersin|Kayseri|Eskişehir|Samsun|Denizli|Trabzon|Muğla|Aydın|Balıkesir|Malatya|Erzurum|Diyarbakır|Sakarya|Tekirdağ|Hatay|Manisa|Kocaeli)/,
         );
         const city = cityMatch ? cityMatch[1] : undefined;
 
         // District (after city, after comma)
-        const districtMatch = allText.match(/(?:İstanbul|Ankara|İzmir|Bursa),\s*([A-Za-zçğıöşüÇĞİÖŞÜ]+)/);
+        const districtMatch = allText.match(
+          /(?:İstanbul|Ankara|İzmir|Bursa|Antalya|Adana|Konya),\s*([A-Za-zçğıöşüÇĞİÖŞÜ]+)/,
+        );
         const district = districtMatch ? districtMatch[1] : undefined;
 
         // Seller type
         const isPlus = allText.includes('Plus Satıcı');
         const sellerType = isPlus ? 'Galeri' : 'Sahibinden';
 
-        // Only add if we have meaningful data
-        if (rawMake && price > 0) {
+        // Only add if we have meaningful data — must have a price AND a year (filter out parts/accessories)
+        if (rawMake && price > 0 && year > 0) {
           listings.push({
             sourceName: this.sourceName,
             sourceUrl: link ? `${this.baseUrl}${link}` : '',
             make: this.normalizeMake(rawMake),
             model: this.normalizeModel(rawModel),
-            year: year || 0,
+            year,
             price,
             currency: 'TRY',
             mileageKm,
@@ -194,32 +203,26 @@ export class LetgoAdapter extends BaseAdapter {
       const html = await this.fetchWithPoliteness(url);
       const $ = cheerio.load(html);
 
-      // Extract detail info from the page
       const title = $('title').text().trim();
       const allText = $('body').text();
 
-      // Price
       const priceMatch = allText.match(/([0-9]{1,3}(\.[0-9]{3})+)\s*TL/);
       const price = priceMatch ? parseInt(priceMatch[1].replace(/\./g, '')) : 0;
 
-      // Year & KM
       const yearKmMatch = allText.match(/(\d{4})\s*-\s*([0-9.]+)\s*KM/);
       const year = yearKmMatch ? parseInt(yearKmMatch[1]) : 0;
       const mileageKm = yearKmMatch ? parseInt(yearKmMatch[2].replace(/\./g, '')) : undefined;
 
-      // Make/Model from title
       const titleParts = title.split(' ').slice(0, 5);
       const make = titleParts[0] || '';
       const model = titleParts.slice(1).join(' ') || '';
 
-      // Images
       const imageUrls: string[] = [];
       $('img[src*="img.letgo"]').each((_, el) => {
         const src = $(el).attr('src') || '';
         if (src) imageUrls.push(src);
       });
 
-      // Description
       const descMatch = allText.match(/Açıklama\s*([\s\S]*?)(?:\s*Satıcı|$)/);
       const description = descMatch ? descMatch[1].trim().substring(0, 500) : undefined;
 
