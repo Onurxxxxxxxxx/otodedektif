@@ -19,8 +19,12 @@ export class LetgoAdapter extends BaseAdapter {
     key: 'letgo',
   });
 
-  /** How many pages to scrape (each page has ~26 listings) */
-  private readonly MAX_PAGES = 10;
+  /**
+   * Letgo SSR HTML returns the same ~26 listings for any path / offset,
+   * so multiple page fetches waste time without yielding new data.
+   * Setting MAX_PAGES = 1 means we grab the SSR snapshot once.
+   */
+  private readonly MAX_PAGES = 1;
 
   async search(filters: SearchFilters): Promise<AdapterResult> {
     const startTime = Date.now();
