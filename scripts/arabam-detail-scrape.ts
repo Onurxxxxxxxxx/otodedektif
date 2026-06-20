@@ -255,7 +255,21 @@ async function fetchDetailPage(
 function parseDetailPage(html: string, sourceUrl: string): RawListing | null {
   const $ = cheerio.load(html);
   
-  // Strip wayback toolbar if present
+  // ─── CANONICAL URL — kullanıcının tıklayınca gideceği GERÇEK ilan linki ───
+  // arabam.com bazen listing URL'lerini redirect eder; canonical URL her zaman doğrudur
+  let canonicalUrl = '';
+  const canonicalEl = $('link[rel="canonical"]').first();
+  if (canonicalEl.length) {
+    canonicalUrl = canonicalEl.attr('href') || '';
+    // Strip wayback prefix if present
+    const m = canonicalUrl.match(/\/web\/\d+(?:im_|if_|id_)?\/(https?:\/\/.+)/);
+    if (m) canonicalUrl = m[1];
+    if (canonicalUrl && !canonicalUrl.startsWith('http')) {
+      canonicalUrl = `https://www.arabam.com${canonicalUrl.startsWith('/') ? '' : '/'}${canonicalUrl}`;
+    }
+  }
+  // finalUrl: canonical tercih, fallback sourceUrl
+  const finalUrl = canonicalUrl || sourceUrl;
   
   // ─── Title ───
   let title = '';
@@ -331,7 +345,8 @@ function parseDetailPage(html: string, sourceUrl: string): RawListing | null {
   let bodyType = findProp(['kasa', 'body', 'araç tipi', 'gövde']) 
     ? normalizeBody(findProp(['kasa', 'body'])!) : undefined;
   let color = findProp(['renk', 'color']) ? normalizeColor(findProp(['renk', 'color'])!) : undefined;
-  const city = findProp(['il', 'şehir', 'sehir', 'city', 'konum', 'location']);
+  // City — only from 'İl' / 'Şehir' property (NOT 'konum'/'location' which is district)
+  const city = findProp(['il ', 'il$', 'şehir', 'sehir', 'city']);
   const sellerTypeStr = findProp(['kimden', 'satıcı', 'satici']) || '';
   let sellerType = sellerTypeStr ? normalizeSellerType(sellerTypeStr) : undefined;
   
@@ -361,7 +376,7 @@ function parseDetailPage(html: string, sourceUrl: string): RawListing | null {
   const location = $('.product-location span, .product-location').first().text().trim() || undefined;
   
   // ─── Make/Model ───
-  let { make, model } = extractMakeModelFromUrl(sourceUrl);
+  let { make, model } = extractMakeModelFromUrl(finalUrl);
   if (!make && title) {
     const parts = title.trim().split(/\s+/);
     const firstWord = parts[0]?.toLowerCase() || '';
@@ -416,7 +431,7 @@ function parseDetailPage(html: string, sourceUrl: string): RawListing | null {
   
   return {
     sourceName: 'arabam',
-    sourceUrl,
+    sourceUrl: finalUrl,  // CANONICAL URL — kullanıcının tıklayınca gideceği gerçek ilan linki
     make,
     model,
     year,
