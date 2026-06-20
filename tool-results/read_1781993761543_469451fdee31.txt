@@ -1,0 +1,1019 @@
+     1→================================================================================
+     2→                    ARABAM.COM SCRAPER - PLAYWRIGHT
+     3→          Gerçek HTML Yapısına Göre Optimize Edilmiş Script
+     4→================================================================================
+     5→
+     6→BU SCRIPT, ARABAM.COM'UN GERÇEK HTML YAPISINA GÖRE YAZILMIŞTIR.
+     7→
+     8→KULLANIM AMACI:
+     9→- arabam.com'dan test verisi çekmek
+    10→- Yerel geliştirme ortamında algoritma testleri için
+    11→- Sadece 100-200 adet ilan verisi toplar
+    12→
+    13→DESTEKLENEN:
+    14→✅ arabam.com (SPA - Playwright ile)
+    15→✅ Detay sayfası parsing
+    16→✅ Arama sonuçları parsing
+    17→
+    18→================================================================================
+    19→                    KURULUM
+    20→================================================================================
+    21→
+    22→# 1. Proje klasörü oluştur
+    23→mkdir arabam-scraper
+    24→cd arabam-scraper
+    25→
+    26→# 2. package.json oluştur
+    27→npm init -y
+    28→
+    29→# 3. Bağımlılıkları yükle
+    30→npm install playwright
+    31→
+    32→# 4. Playwright browser'larını yükle
+    33→npx playwright install chromium
+    34→
+    35→# 5. Script'i oluştur (scraper.js)
+    36→# Aşağıdaki kod bloğunu scraper.js dosyasına kopyala
+    37→
+    38→# 6. ÇALIŞTIR
+    39→node scraper.js --pages=2 --headless=false
+    40→
+    41→================================================================================
+    42→                    SCRAPER.JS KODU
+    43→================================================================================
+    44→
+    45→// ================================================================
+    46→// ARABAM.COM SCRAPER - Gerçek HTML Yapısına Göre
+    47→// ================================================================
+    48→// Kullanım:
+    49→//   node scraper.js --pages=2
+    50→//   node scraper.js --pages=3 --headless=false
+    51→//   node scraper.js --detail=40717718
+    52→// ================================================================
+    53→
+    54→const { chromium } = require('playwright');
+    55→const fs = require('fs');
+    56→const path = require('path');
+    57→
+    58→// ================================================================
+    59→// 1. KONFIGÜRASYON
+    60→// ================================================================
+    61→
+    62→const CONFIG = {
+    63→  // Kaç sayfa taranacak (her sayfada ~20-25 ilan)
+    64→  maxPages: process.argv.includes('--pages')
+    65→    ? parseInt(process.argv[process.argv.indexOf('--pages') + 1])
+    66→    : 2,
+    67→
+    68→  // Tekil ilan detayı çekmek için
+    69→  detailId: process.argv.includes('--detail')
+    70→    ? process.argv[process.argv.indexOf('--detail') + 1]
+    71→    : null,
+    72→
+    73→  // Toplam max ilan
+    74→  maxTotalListings: 200,
+    75→
+    76→  // Browser ayarları
+    77→  headless: process.argv.includes('--headless=false') ? false : true,
+    78→
+    79→  // Bekleme süreleri (milisaniye)
+    80→  delays: {
+    81→    min: 3000,
+    82→    max: 7000,
+    83→    betweenPages: 8000,
+    84→    afterScroll: 2000,
+    85→    afterAction: 1500,
+    86→    networkIdle: 15000,
+    87→  },
+    88→
+    89→  // Proxy ayarları (opsiyonel)
+    90→  proxy: {
+    91→    enabled: false,
+    92→  }
+    93→};
+    94→
+    95→// ================================================================
+    96→// 2. ARABAM.COM SELECTOR'LARI (GERÇEK HTML'DEN)
+    97→// ================================================================
+    98→
+    99→const SELECTORS = {
+   100→  // ---- Arama Sonuçları ----
+   101→  search: {
+   102→    // İlan kartları
+   103→    listings: [
+   104→      '.listing-item',
+   105→      '.car-card',
+   106→      '.vehicle-item',
+   107→      '.ad-item',
+   108→      '[data-testid="listing-card"]',
+   109→      '.product-item'
+   110→    ],
+   111→    // Başlık
+   112→    title: [
+   113→      '.title',
+   114→      '.listing-title',
+   115→      '.car-name',
+   116→      'h3',
+   117→      '.card-title',
+   118→      '.product-title'
+   119→    ],
+   120→    // Fiyat
+   121→    price: [
+   122→      '.price',
+   123→      '.listing-price',
+   124→      '.car-price',
+   125→      '.price-value',
+   126→      '.product-price'
+   127→    ],
+   128→    // Yıl
+   129→    year: [
+   130→      '.year',
+   131→      '.model-year',
+   132→      '.car-year',
+   133→      '.year-value'
+   134→    ],
+   135→    // Kilometre
+   136→    km: [
+   137→      '.km',
+   138→      '.mileage',
+   139→      '.car-mileage',
+   140→      '.km-value'
+   141→    ],
+   142→    // Yakıt
+   143→    fuel: [
+   144→      '.fuel',
+   145→      '.fuel-type',
+   146→      '.car-fuel',
+   147→      '.fuel-value'
+   148→    ],
+   149→    // Vites
+   150→    transmission: [
+   151→      '.transmission',
+   152→      '.gear',
+   153→      '.car-gear',
+   154→      '.gear-value'
+   155→    ],
+   156→    // Şehir
+   157→    city: [
+   158→      '.city',
+   159→      '.location',
+   160→      '.car-location',
+   161→      '.location-value'
+   162→    ],
+   163→    // Görsel
+   164→    image: [
+   165→      'img',
+   166→      '.car-image img',
+   167→      '.listing-image img'
+   168→    ],
+   169→    // Link
+   170→    link: [
+   171→      'a[href*="/ilan/"]',
+   172→      'a[href*="/araba/"]',
+   173→      'a.listing-link',
+   174→      'a.product-link'
+   175→    ]
+   176→  },
+   177→
+   178→  // ---- Detay Sayfası ----
+   179→  detail: {
+   180→    // Başlık - sizin HTML'inizde: .product-name-container
+   181→    title: '.product-name-container',
+   182→    
+   183→    // Fiyat - sizin HTML'inizde: .product-price
+   184→    price: '.product-price',
+   185→    
+   186→    // İlan No - sizin HTML'inizde: #js-hook-copy-text
+   187→    listingId: '#js-hook-copy-text, .property-value[id="js-hook-copy-text"]',
+   188→    
+   189→    // Özellikler - sizin HTML'inizde: .product-properties-details .property-item
+   190→    properties: '.product-properties-details .property-item',
+   191→    
+   192→    // Açıklama - sizin HTML'inizde: #tab-description
+   193→    description: '#tab-description p, .tab-description p',
+   194→    
+   195→    // Görseller - sizin HTML'inizde: .slider-container .swiper-slide img
+   196→    images: '.slider-container .swiper-slide img, .swiper-slide img[data-src]',
+   197→    
+   198→    // Galeri adı - sizin HTML'inizde: .advert-owner-name
+   199→    sellerName: '.advert-owner-name',
+   200→    
+   201→    // Konum - sizin HTML'inizde: .product-location
+   202→    location: '.product-location span, .product-location',
+   203→    
+   204→    // Tarih - sizin HTML'inizde: .property-value (İlan Tarihi)
+   205→    date: '.property-item .property-value'
+   206→  }
+   207→};
+   208→
+   209→// ================================================================
+   210→// 3. ARABAM.COM SCRAPER SINIFI
+   211→// ================================================================
+   212→
+   213→class ArabamScraper {
+   214→  constructor() {
+   215→    this.browser = null;
+   216→    this.context = null;
+   217→    this.page = null;
+   218→    this.listings = [];
+   219→    this.errors = [];
+   220→    this.startTime = Date.now();
+   221→  }
+   222→
+   223→  // ================================================================
+   224→  // 3.1. Browser Başlatma
+   225→  // ================================================================
+   226→
+   227→  async init() {
+   228→    console.log('\n🚀 Browser başlatılıyor...');
+   229→    console.log(`🖥️  Headless: ${CONFIG.headless ? 'EVET' : 'HAYIR (görünür mod)'}`);
+   230→
+   231→    const launchOptions = {
+   232→      headless: CONFIG.headless,
+   233→      args: [
+   234→        '--no-sandbox',
+   235→        '--disable-setuid-sandbox',
+   236→        '--disable-dev-shm-usage',
+   237→        '--disable-accelerated-2d-canvas',
+   238→        '--disable-gpu',
+   239→        '--window-size=1920,1080',
+   240→        '--disable-blink-features=AutomationControlled',
+   241→        '--disable-web-security',
+   242→        '--disable-features=IsolateOrigins,site-per-process',
+   243→        '--disable-infobars',
+   244→        '--disable-notifications',
+   245→        '--no-default-browser-check',
+   246→        '--no-first-run',
+   247→      ]
+   248→    };
+   249→
+   250→    // Proxy desteği
+   251→    if (CONFIG.proxy.enabled && CONFIG.proxy.server) {
+   252→      launchOptions.proxy = { server: CONFIG.proxy.server };
+   253→      if (CONFIG.proxy.username) {
+   254→        launchOptions.proxy.username = CONFIG.proxy.username;
+   255→        launchOptions.proxy.password = CONFIG.proxy.password;
+   256→      }
+   257→      console.log(`🌐 Proxy: ${CONFIG.proxy.server}`);
+   258→    }
+   259→
+   260→    this.browser = await chromium.launch(launchOptions);
+   261→
+   262→    // Context oluştur - gerçek tarayıcı gibi
+   263→    this.context = await this.browser.newContext({
+   264→      viewport: { width: 1920, height: 1080 },
+   265→      userAgent: this.getRandomUserAgent(),
+   266→      locale: 'tr-TR',
+   267→      timezoneId: 'Europe/Istanbul',
+   268→      permissions: ['geolocation'],
+   269→      deviceScaleFactor: 1,
+   270→      hasTouch: false,
+   271→      isMobile: false,
+   272→      javaScriptEnabled: true,
+   273→      bypassCSP: true,
+   274→      extraHTTPHeaders: {
+   275→        'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7',
+   276→        'Accept-Encoding': 'gzip, deflate, br',
+   277→        'Connection': 'keep-alive',
+   278→        'Upgrade-Insecure-Requests': '1',
+   279→      }
+   280→    });
+   281→
+   282→    this.page = await this.context.newPage();
+   283→
+   284→    // Anti-detection script'leri enjekte et
+   285→    await this.injectAntiDetectionScripts();
+   286→
+   287→    console.log('✅ Browser hazır\n');
+   288→  }
+   289→
+   290→  // ================================================================
+   291→  // 3.2. Anti-Detection Scripts
+   292→  // ================================================================
+   293→
+   294→  async injectAntiDetectionScripts() {
+   295→    await this.page.addInitScript(() => {
+   296→      // ---- WebGL Vendor ----
+   297→      const getParameter = WebGLRenderingContext.prototype.getParameter;
+   298→      WebGLRenderingContext.prototype.getParameter = function(parameter) {
+   299→        if (parameter === 37445) return 'Intel Inc.';
+   300→        if (parameter === 37446) return 'Intel Iris OpenGL Engine';
+   301→        return getParameter.call(this, parameter);
+   302→      };
+   303→
+   304→      // ---- Canvas ----
+   305→      const getImageData = CanvasRenderingContext2D.prototype.getImageData;
+   306→      CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
+   307→        const imageData = getImageData.call(this, x, y, w, h);
+   308→        const data = imageData.data;
+   309→        for (let i = 0; i < data.length; i += 4) {
+   310→          if (Math.random() < 0.001) {
+   311→            data[i] = data[i] ^ 1;
+   312→            data[i+1] = data[i+1] ^ 1;
+   313→            data[i+2] = data[i+2] ^ 1;
+   314→          }
+   315→        }
+   316→        return imageData;
+   317→      };
+   318→
+   319→      // ---- WebDriver ----
+   320→      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+   321→
+   322→      // ---- Plugins ----
+   323→      Object.defineProperty(navigator, 'plugins', {
+   324→        get: () => [
+   325→          { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+   326→          { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+   327→          { name: 'Native Client', filename: 'internal-nacl-plugin' }
+   328→        ]
+   329→      });
+   330→
+   331→      // ---- Navigator ----
+   332→      Object.defineProperty(navigator, 'languages', {
+   333→        get: () => ['tr-TR', 'tr', 'en-US', 'en']
+   334→      });
+   335→      Object.defineProperty(navigator, 'platform', {
+   336→        get: () => 'Win32'
+   337→      });
+   338→      Object.defineProperty(navigator, 'hardwareConcurrency', {
+   339→        get: () => 8
+   340→      });
+   341→      Object.defineProperty(navigator, 'deviceMemory', {
+   342→        get: () => 8
+   343→      });
+   344→
+   345→      // ---- Screen ----
+   346→      Object.defineProperty(screen, 'availWidth', { get: () => 1920 });
+   347→      Object.defineProperty(screen, 'availHeight', { get: () => 1040 });
+   348→
+   349→      // ---- Chrome ----
+   350→      if (window.chrome) {
+   351→        Object.defineProperty(window.chrome, 'runtime', { get: () => undefined });
+   352→      }
+   353→
+   354→      // ---- WebRTC ----
+   355→      const originalRTCPeerConnection = window.RTCPeerConnection;
+   356→      window.RTCPeerConnection = function(config) {
+   357→        if (config && config.iceServers) {
+   358→          config.iceServers = config.iceServers.filter(
+   359→            server => server.url && !server.url.includes('stun')
+   360→          );
+   361→        }
+   362→        return new originalRTCPeerConnection(config);
+   363→      };
+   364→    });
+   365→  }
+   366→
+   367→  // ================================================================
+   368→  // 3.3. Random User-Agent
+   369→  // ================================================================
+   370→
+   371→  getRandomUserAgent() {
+   372→    const agents = [
+   373→      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+   374→      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+   375→      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+   376→      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+   377→      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+   378→      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+   379→      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15'
+   380→    ];
+   381→    return agents[Math.floor(Math.random() * agents.length)];
+   382→  }
+   383→
+   384→  // ================================================================
+   385→  // 3.4. Rastgele Gecikme
+   386→  // ================================================================
+   387→
+   388→  getRandomDelay(min = CONFIG.delays.min, max = CONFIG.delays.max) {
+   389→    return Math.floor(Math.random() * (max - min + 1)) + min;
+   390→  }
+   391→
+   392→  async randomWait(min = CONFIG.delays.min, max = CONFIG.delays.max) {
+   393→    const delay = this.getRandomDelay(min, max);
+   394→    await this.page.waitForTimeout(delay);
+   395→  }
+   396→
+   397→  // ================================================================
+   398→  // 3.5. İnsan Davranışı Simülasyonu
+   399→  // ================================================================
+   400→
+   401→  async simulateHumanBehavior() {
+   402→    try {
+   403→      // ---- 1. Rastgele bekleme ----
+   404→      await this.randomWait();
+   405→
+   406→      // ---- 2. Rastgele scroll ----
+   407→      const scrollCount = Math.floor(Math.random() * 3) + 2;
+   408→      for (let i = 0; i < scrollCount; i++) {
+   409→        const direction = Math.random() > 0.5 ? 1 : -1;
+   410→        const amount = Math.floor(Math.random() * 400) + 100;
+   411→        await this.page.evaluate((dir, amt) => {
+   412→          window.scrollBy({ top: dir * amt, behavior: 'smooth' });
+   413→        }, direction, amount);
+   414→        await this.page.waitForTimeout(Math.random() * 800 + 300);
+   415→      }
+   416→
+   417→      // ---- 3. Mouse hareketi ----
+   418→      const movePoints = Math.floor(Math.random() * 3) + 1;
+   419→      for (let i = 0; i < movePoints; i++) {
+   420→        const x = Math.floor(Math.random() * 1200) + 100;
+   421→        const y = Math.floor(Math.random() * 600) + 100;
+   422→        await this.page.mouse.move(x, y, { steps: Math.floor(Math.random() * 10) + 5 });
+   423→        await this.page.waitForTimeout(Math.random() * 300 + 100);
+   424→      }
+   425→
+   426→    } catch (error) {
+   427→      console.log('⚠️ Davranış simülasyonu hatası:', error.message);
+   428→    }
+   429→  }
+   430→
+   431→  // ================================================================
+   432→  // 3.6. Arama Sonuçlarını Scrape Et
+   433→  // ================================================================
+   434→
+   435→  async scrapeSearch(pageNumber) {
+   436→    const url = pageNumber === 1
+   437→      ? 'https://www.arabam.com/ikinci-el/otomobil'
+   438→      : `https://www.arabam.com/ikinci-el/otomobil?page=${pageNumber}`;
+   439→
+   440→    console.log(`\n📄 Sayfa ${pageNumber}: ${url}`);
+   441→
+   442→    try {
+   443→      await this.page.goto(url, {
+   444→        waitUntil: 'networkidle',
+   445→        timeout: 60000
+   446→      });
+   447→
+   448→      await this.simulateHumanBehavior();
+   449→
+   450→      // Sayfanın yüklendiğini kontrol et
+   451→      try {
+   452→        await this.page.waitForSelector('.listing-item, .car-card, .vehicle-item', {
+   453→          timeout: 15000
+   454→        });
+   455→        console.log('✅ İlan listesi bulundu');
+   456→      } catch (e) {
+   457→        console.log('⚠️ İlan listesi bulunamadı, alternatif selector\'lar deneniyor...');
+   458→      }
+   459→
+   460→      // İlanları çek - SELECTORS.search kullan
+   461→      const pageListings = await this.page.evaluate((selectors) => {
+   462→        const items = [];
+   463→        
+   464→        // Birden fazla selector dene
+   465→        let elements = [];
+   466→        for (const selector of selectors.listings) {
+   467→          const found = document.querySelectorAll(selector);
+   468→          if (found.length > 0) {
+   469→            elements = found;
+   470→            break;
+   471→          }
+   472→        }
+   473→
+   474→        if (elements.length === 0) {
+   475→          return items;
+   476→        }
+   477→
+   478→        elements.forEach((el, index) => {
+   479→          try {
+   480→            // ---- Link ----
+   481→            let link = '';
+   482→            for (const sel of selectors.link) {
+   483→              const linkEl = el.querySelector(sel);
+   484→              if (linkEl) {
+   485→                link = linkEl.getAttribute('href');
+   486→                break;
+   487→              }
+   488→            }
+   489→            if (link && !link.startsWith('http')) {
+   490→              link = `https://www.arabam.com${link.startsWith('/') ? '' : '/'}${link}`;
+   491→            }
+   492→
+   493→            // ---- Title ----
+   494→            let title = '';
+   495→            for (const sel of selectors.title) {
+   496→              const el_ = el.querySelector(sel);
+   497→              if (el_) { title = el_.textContent.trim(); break; }
+   498→            }
+   499→
+   500→            // ---- Price ----
+   501→            let price = 0;
+   502→            for (const sel of selectors.price) {
+   503→              const el_ = el.querySelector(sel);
+   504→              if (el_) {
+   505→                const text = el_.textContent.trim();
+   506→                const cleaned = text.replace(/[^0-9,.]/g, '').replace(/\./g, '').replace(/,/g, '.');
+   507→                price = parseFloat(cleaned) || 0;
+   508→                break;
+   509→              }
+   510→            }
+   511→
+   512→            // ---- Year ----
+   513→            let year = 0;
+   514→            for (const sel of selectors.year) {
+   515→              const el_ = el.querySelector(sel);
+   516→              if (el_) { year = parseInt(el_.textContent.trim()) || 0; break; }
+   517→            }
+   518→
+   519→            // ---- KM ----
+   520→            let km = 0;
+   521→            for (const sel of selectors.km) {
+   522→              const el_ = el.querySelector(sel);
+   523→              if (el_) {
+   524→                const text = el_.textContent.trim();
+   525→                km = parseInt(text.replace(/[^0-9]/g, '')) || 0;
+   526→                break;
+   527→              }
+   528→            }
+   529→
+   530→            // ---- Fuel ----
+   531→            let fuel = '';
+   532→            for (const sel of selectors.fuel) {
+   533→              const el_ = el.querySelector(sel);
+   534→              if (el_) { fuel = el_.textContent.trim(); break; }
+   535→            }
+   536→
+   537→            // ---- Transmission ----
+   538→            let transmission = '';
+   539→            for (const sel of selectors.transmission) {
+   540→              const el_ = el.querySelector(sel);
+   541→              if (el_) { transmission = el_.textContent.trim(); break; }
+   542→            }
+   543→
+   544→            // ---- City ----
+   545→            let city = '';
+   546→            for (const sel of selectors.city) {
+   547→              const el_ = el.querySelector(sel);
+   548→              if (el_) { city = el_.textContent.trim(); break; }
+   549→            }
+   550→
+   551→            // ---- Image ----
+   552→            let imageUrl = '';
+   553→            for (const sel of selectors.image) {
+   554→              const el_ = el.querySelector(sel);
+   555→              if (el_) {
+   556→                imageUrl = el_.getAttribute('src') || 
+   557→                           el_.getAttribute('data-src') || 
+   558→                           el_.getAttribute('srcset')?.split(' ')[0] || '';
+   559→                break;
+   560→              }
+   561→            }
+   562→
+   563→            // ---- Make & Model ----
+   564→            let make = '', model = '';
+   565→            if (title) {
+   566→              const parts = title.trim().split(' ');
+   567→              const makes = ['ford', 'opel', 'vw', 'volkswagen', 'bmw', 'mercedes', 'audi',
+   568→                'toyota', 'renault', 'fiat', 'hyundai', 'nissan', 'honda', 'peugeot',
+   569→                'citroen', 'skoda', 'seat', 'kia', 'mazda', 'volvo', 'mini', 'smart',
+   570→                'subaru', 'suzuki', 'mitsubishi', 'dacia', 'chery', 'togg', 'tesla'];
+   571→
+   572→              if (parts.length >= 2) {
+   573→                const twoWord = `${parts[0].toLowerCase()} ${parts[1].toLowerCase()}`;
+   574→                if (twoWord === 'alfa romeo' || twoWord === 'land rover') {
+   575→                  make = parts[0] + ' ' + parts[1];
+   576→                  model = parts.slice(2).join(' ');
+   577→                } else if (makes.includes(parts[0].toLowerCase())) {
+   578→                  make = parts[0];
+   579→                  model = parts.slice(1).join(' ');
+   580→                } else {
+   581→                  make = parts[0];
+   582→                  model = parts.slice(1).join(' ');
+   583→                }
+   584→              } else {
+   585→                make = parts[0] || '';
+   586→              }
+   587→            }
+   588→
+   589→            // ID'yi link'ten çıkar
+   590→            const idMatch = link.match(/\/(\d+)(?:\/|$)/);
+   591→            const id = idMatch ? idMatch[1] : '';
+   592→
+   593→            if (price > 0 || title) {
+   594→              items.push({
+   595→                id: id,
+   596→                source_name: 'arabam.com',
+   597→                source_url: link || '',
+   598→                make: make || '',
+   599→                model: model || '',
+   600→                title: title || '',
+   601→                year: year || 0,
+   602→                price: price || 0,
+   603→                currency: 'TRY',
+   604→                mileage_km: km > 0 ? km : undefined,
+   605→                fuel_type: fuel || undefined,
+   606→                transmission: transmission || undefined,
+   607→                city: city || undefined,
+   608→                image_url: imageUrl || undefined,
+   609→                scraped_at: new Date().toISOString(),
+   610→                _index: index + 1
+   611→              });
+   612→            }
+   613→
+   614→          } catch (error) {
+   615→            // Tek ilan hatası tüm işlemi durdurmasın
+   616→            console.log(`⚠️ İlan ${index + 1} parse hatası:`, error.message);
+   617→          }
+   618→        });
+   619→
+   620→        return items;
+   621→      }, SELECTORS.search);
+   622→
+   623→      console.log(`✅ ${pageListings.length} ilan çekildi`);
+   624→      return pageListings;
+   625→
+   626→    } catch (error) {
+   627→      console.log(`❌ Sayfa ${pageNumber} hatası:`, error.message);
+   628→      this.errors.push({ page: pageNumber, url, error: error.message });
+   629→      return [];
+   630→    }
+   631→  }
+   632→
+   633→  // ================================================================
+   634→  // 3.7. Detay Sayfasını Scrape Et (Sizin HTML'inize göre)
+   635→  // ================================================================
+   636→
+   637→  async scrapeDetail(listingId) {
+   638→    const url = `https://www.arabam.com/ilan/detay/${listingId}`;
+   639→    console.log(`\n🔍 Detay sayfası: ${url}`);
+   640→
+   641→    try {
+   642→      await this.page.goto(url, {
+   643→        waitUntil: 'networkidle',
+   644→        timeout: 60000
+   645→      });
+   646→
+   647→      await this.simulateHumanBehavior();
+   648→
+   649→      // Detay bilgilerini çek - SELECTORS.detail kullan
+   650→      const detail = await this.page.evaluate((selectors) => {
+   651→        const data = {};
+   652→
+   653→        // ---- Başlık ----
+   654→        for (const sel of selectors.title) {
+   655→          const el = document.querySelector(sel);
+   656→          if (el) { data.title = el.textContent.trim(); break; }
+   657→        }
+   658→
+   659→        // ---- Fiyat ----
+   660→        for (const sel of selectors.price) {
+   661→          const el = document.querySelector(sel);
+   662→          if (el) {
+   663→            const text = el.textContent.trim();
+   664→            const cleaned = text.replace(/[^0-9,.]/g, '').replace(/\./g, '').replace(/,/g, '.');
+   665→            data.price = parseFloat(cleaned) || 0;
+   666→            break;
+   667→          }
+   668→        }
+   669→
+   670→        // ---- İlan No ----
+   671→        for (const sel of selectors.listingId) {
+   672→          const el = document.querySelector(sel);
+   673→          if (el) { data.id = el.textContent.trim(); break; }
+   674→        }
+   675→
+   676→        // ---- Özellikler ----
+   677→        data.properties = {};
+   678→        const propertyItems = document.querySelectorAll(selectors.properties);
+   679→        propertyItems.forEach(el => {
+   680→          const key = el.querySelector('.property-key')?.textContent?.trim();
+   681→          const value = el.querySelector('.property-value')?.textContent?.trim();
+   682→          if (key && value) {
+   683→            data.properties[key] = value;
+   684→          }
+   685→        });
+   686→
+   687→        // ---- Açıklama ----
+   688→        const descEl = document.querySelector(selectors.description);
+   689→        if (descEl) {
+   690→          data.description = descEl.textContent.trim();
+   691→        }
+   692→
+   693→        // ---- Görseller ----
+   694→        data.images = [];
+   695→        const imgEls = document.querySelectorAll(selectors.images);
+   696→        imgEls.forEach(img => {
+   697→          const src = img.getAttribute('src') || 
+   698→                      img.getAttribute('data-src') || 
+   699→                      img.getAttribute('srcset')?.split(' ')[0];
+   700→          if (src && src.includes('mncdn.com')) {
+   701→            data.images.push(src);
+   702→          }
+   703→        });
+   704→
+   705→        // ---- Satıcı ----
+   706→        for (const sel of selectors.sellerName) {
+   707→          const el = document.querySelector(sel);
+   708→          if (el) { data.seller_name = el.textContent.trim(); break; }
+   709→        }
+   710→
+   711→        // ---- Konum ----
+   712→        for (const sel of selectors.location) {
+   713→          const el = document.querySelector(sel);
+   714→          if (el) { data.location = el.textContent.trim(); break; }
+   715→        }
+   716→
+   717→        return data;
+   718→      }, SELECTORS.detail);
+   719→
+   720→      // Marka ve modeli başlıktan çıkar
+   721→      if (detail.title) {
+   722→        const parts = detail.title.trim().split(' ');
+   723→        const makes = ['ford', 'opel', 'vw', 'volkswagen', 'bmw', 'mercedes', 'audi',
+   724→          'toyota', 'renault', 'fiat', 'hyundai', 'nissan', 'honda', 'peugeot',
+   725→          'citroen', 'skoda', 'seat', 'kia', 'mazda', 'volvo', 'mini', 'smart'];
+   726→
+   727→        if (parts.length >= 2) {
+   728→          const twoWord = `${parts[0].toLowerCase()} ${parts[1].toLowerCase()}`;
+   729→          if (twoWord === 'alfa romeo' || twoWord === 'land rover') {
+   730→            detail.make = parts[0] + ' ' + parts[1];
+   731→            detail.model = parts.slice(2).join(' ');
+   732→          } else if (makes.includes(parts[0].toLowerCase())) {
+   733→            detail.make = parts[0];
+   734→            detail.model = parts.slice(1).join(' ');
+   735→          } else {
+   736→            detail.make = parts[0];
+   737→            detail.model = parts.slice(1).join(' ');
+   738→          }
+   739→        }
+   740→      }
+   741→
+   742→      // Properties'ten ek bilgileri al
+   743→      if (detail.properties) {
+   744→        detail.year = parseInt(detail.properties['Yıl']) || 0;
+   745→        detail.mileage_km = parseInt(detail.properties['Kilometre']?.replace(/[^0-9]/g, '')) || 0;
+   746→        detail.fuel_type = detail.properties['Yakıt Tipi'] || '';
+   747→        detail.transmission = detail.properties['Vites Tipi'] || '';
+   748→        detail.body_type = detail.properties['Kasa Tipi'] || '';
+   749→        detail.color = detail.properties['Renk'] || '';
+   750→        detail.city = detail.properties['İl'] || detail.location || '';
+   751→        detail.seller_type = detail.properties['Kimden'] || '';
+   752→      }
+   753→
+   754→      detail.source_name = 'arabam.com';
+   755→      detail.source_url = url;
+   756→      detail.scraped_at = new Date().toISOString();
+   757→
+   758→      console.log(`✅ Detay çekildi: ${detail.title?.substring(0, 50)}...`);
+   759→      return detail;
+   760→
+   761→    } catch (error) {
+   762→      console.log(`❌ Detay hatası:`, error.message);
+   763→      return null;
+   764→    }
+   765→  }
+   766→
+   767→  // ================================================================
+   768→  // 3.8. Ana Scraping Metodu
+   769→  // ================================================================
+   770→
+   771→  async scrape() {
+   772→    try {
+   773→      console.log('═══════════════════════════════════════════════════');
+   774→      console.log('🚗 ARABAM.COM SCRAPER');
+   775→      console.log('═══════════════════════════════════════════════════');
+   776→      console.log(`📄 Max sayfa: ${CONFIG.maxPages}`);
+   777→      console.log(`📊 Max ilan: ${CONFIG.maxTotalListings}`);
+   778→      console.log(`🖥️  Görünür mod: ${!CONFIG.headless}`);
+   779→      console.log('═══════════════════════════════════════════════════\n');
+   780→
+   781→      // ---- Browser başlat ----
+   782→      await this.init();
+   783→
+   784→      // ---- Tekil ilan detayı ----
+   785→      if (CONFIG.detailId) {
+   786→        const detail = await this.scrapeDetail(CONFIG.detailId);
+   787→        if (detail) {
+   788→          this.listings.push(detail);
+   789→          this.saveResults();
+   790→        }
+   791→        return;
+   792→      }
+   793→
+   794→      // ---- Sayfaları tara ----
+   795→      for (let pageNum = 1; pageNum <= CONFIG.maxPages; pageNum++) {
+   796→        if (this.listings.length >= CONFIG.maxTotalListings) {
+   797→          console.log(`\n✅ ${CONFIG.maxTotalListings} ilan hedefine ulaşıldı.`);
+   798→          break;
+   799→        }
+   800→
+   801→        const pageListings = await this.scrapeSearch(pageNum);
+   802→        
+   803→        const remaining = CONFIG.maxTotalListings - this.listings.length;
+   804→        const toAdd = pageListings.slice(0, remaining);
+   805→        this.listings.push(...toAdd);
+   806→
+   807→        console.log(`📦 Toplam: ${this.listings.length}/${CONFIG.maxTotalListings} ilan`);
+   808→
+   809→        if (pageNum < CONFIG.maxPages && this.listings.length < CONFIG.maxTotalListings) {
+   810→          console.log(`⏳ Sayfalar arası ${CONFIG.delays.betweenPages}ms bekleniyor...`);
+   811→          await this.page.waitForTimeout(CONFIG.delays.betweenPages);
+   812→        }
+   813→      }
+   814→
+   815→      // ---- Sonuçları kaydet ----
+   816→      this.saveResults();
+   817→
+   818→    } catch (error) {
+   819→      console.error('\n❌ Scraping hatası:', error);
+   820→    } finally {
+   821→      if (this.browser) {
+   822→        await this.browser.close();
+   823→        console.log('\n🔒 Browser kapatıldı');
+   824→      }
+   825→    }
+   826→  }
+   827→
+   828→  // ================================================================
+   829→  // 3.9. Sonuçları Kaydet
+   830→  // ================================================================
+   831→
+   832→  saveResults() {
+   833→    const duration = (Date.now() - this.startTime) / 1000;
+   834→
+   835→    const output = {
+   836→      metadata: {
+   837→        site: 'arabam.com',
+   838→        scraped_at: new Date().toISOString(),
+   839→        total_listings: this.listings.length,
+   840→        total_pages: CONFIG.maxPages,
+   841→        duration_seconds: Math.round(duration),
+   842→        config: {
+   843→          max_pages: CONFIG.maxPages,
+   844→          max_total_listings: CONFIG.maxTotalListings,
+   845→          headless: CONFIG.headless,
+   846→        }
+   847→      },
+   848→      errors: this.errors,
+   849→      listings: this.listings
+   850→    };
+   851→
+   852→    const outputPath = path.join(__dirname, 'arabam_data.json');
+   853→    fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
+   854→
+   855→    console.log('\n═══════════════════════════════════════════════════');
+   856→    console.log('✅ VERİLER KAYDEDİLDİ!');
+   857→    console.log(`📁 Dosya: ${outputPath}`);
+   858→    console.log(`📊 Toplam ilan: ${this.listings.length}`);
+   859→    console.log(`⏱️  Süre: ${Math.round(duration)} saniye`);
+   860→    console.log('═══════════════════════════════════════════════════');
+   861→
+   862→    // ---- İstatistikler ----
+   863→    if (this.listings.length > 0) {
+   864→      const validPrices = this.listings.filter(l => l.price > 0);
+   865→      if (validPrices.length > 0) {
+   866→        const prices = validPrices.map(l => l.price);
+   867→        const avg = Math.round(prices.reduce((a, b) => a + b, 0) / prices.length);
+   868→        const min = Math.min(...prices);
+   869→        const max = Math.max(...prices);
+   870→        console.log('\n💰 Fiyat İstatistikleri:');
+   871→        console.log(`   Min: ${min.toLocaleString()} TL`);
+   872→        console.log(`   Max: ${max.toLocaleString()} TL`);
+   873→        console.log(`   Ort: ${avg.toLocaleString()} TL`);
+   874→      }
+   875→
+   876→      // Marka dağılımı
+   877→      const makes = {};
+   878→      this.listings.forEach(l => {
+   879→        const m = l.make || 'Bilinmiyor';
+   880→        makes[m] = (makes[m] || 0) + 1;
+   881→      });
+   882→      const sortedMakes = Object.entries(makes)
+   883→        .sort((a, b) => b[1] - a[1])
+   884→        .slice(0, 5);
+   885→
+   886→      if (sortedMakes.length > 0) {
+   887→        console.log('\n🏷️  En Çok Görülen Markalar:');
+   888→        sortedMakes.forEach(([make, count]) => {
+   889→          const pct = Math.round((count / this.listings.length) * 100);
+   890→          console.log(`   ${make}: ${count} ilan (${pct}%)`);
+   891→        });
+   892→      }
+   893→
+   894→      console.log('\n📊 Örnek Veri (ilk 3 ilan):');
+   895→      this.listings.slice(0, 3).forEach((l, i) => {
+   896→        console.log(`   ${i + 1}. ${l.make} ${l.model} - ${l.price.toLocaleString()} TL`);
+   897→      });
+   898→    }
+   899→
+   900→    console.log('\n═══════════════════════════════════════════════════');
+   901→  }
+   902→}
+   903→
+   904→// ================================================================
+   905→// 4. ANA PROGRAM
+   906→// ================================================================
+   907→
+   908→async function main() {
+   909→  const scraper = new ArabamScraper();
+   910→  await scraper.scrape();
+   911→}
+   912→
+   913→process.on('unhandledRejection', (error) => {
+   914→  console.error('❌ Unhandled Rejection:', error);
+   915→  process.exit(1);
+   916→});
+   917→
+   918→process.on('SIGINT', async () => {
+   919→  console.log('\n⏹️  İptal edildi, temizleniyor...');
+   920→  process.exit(0);
+   921→});
+   922→
+   923→if (require.main === module) {
+   924→  main().catch(console.error);
+   925→}
+   926→
+   927→module.exports = { ArabamScraper, SELECTORS, CONFIG };
+   928→
+   929→================================================================================
+   930→                    ÇALIŞTIRMA TALİMATLARI
+   931→================================================================================
+   932→
+   933→# 1. Temel Kullanım (2 sayfa, headless mod)
+   934→node scraper.js --pages=2
+   935→
+   936→# 2. Görünür modda çalıştır (debug için)
+   937→node scraper.js --pages=2 --headless=false
+   938→
+   939→# 3. Daha fazla sayfa
+   940→node scraper.js --pages=5
+   941→
+   942→# 4. Tekil ilan detayı çek
+   943→node scraper.js --detail=40717718
+   944→
+   945→# 5. Proxy ile dene (CONFIG.proxy.enabled = true yap)
+   946→node scraper.js --pages=2 --headless=false
+   947→
+   948→================================================================================
+   949→                    SELECTOR'LAR (GERÇEK HTML'DEN)
+   950→================================================================================
+   951→
+   952→| Alan | Selector | Örnek |
+   953→|------|----------|-------|
+   954→| Başlık | .product-name-container | "2023 HATASIZ BOYASIZ OTOMATİK 1.0 TCE JOY" |
+   955→| Fiyat | .product-price | "1.099.950 TL" |
+   956→| İlan No | #js-hook-copy-text | "40717718" |
+   957→| Yıl | .property-item .property-value | "2023" |
+   958→| Kilometre | .property-item .property-value | "104.850 km" |
+   959→| Yakıt | .property-item .property-value | "Benzin" |
+   960→| Vites | .property-item .property-value | "Otomatik" |
+   961→| Kasa | .property-item .property-value | "Hatchback/5" |
+   962→| Renk | .property-item .property-value | "Beyaz" |
+   963→| Açıklama | #tab-description p | İlan metni |
+   964→| Satıcı | .advert-owner-name | "STAR AUTO" |
+   965→| Konum | .product-location | "Yeşiloba Mh. Seyhan, Adana" |
+   966→
+   967→================================================================================
+   968→                    ÖRNEK ÇIKTI (arabam_data.json)
+   969→================================================================================
+   970→
+   971→{
+   972→  "metadata": {
+   973→    "site": "arabam.com",
+   974→    "scraped_at": "2026-06-20T10:30:00.000Z",
+   975→    "total_listings": 45,
+   976→    "total_pages": 2,
+   977→    "duration_seconds": 145,
+   978→    "config": { ... }
+   979→  },
+   980→  "errors": [],
+   981→  "listings": [
+   982→    {
+   983→      "id": "40717718",
+   984→      "source_name": "arabam.com",
+   985→      "source_url": "https://www.arabam.com/ilan/detay/40717718",
+   986→      "make": "Renault",
+   987→      "model": "Clio 1.0 TCe Joy",
+   988→      "title": "2023 HATASIZ BOYASIZ OTOMATİK 1.0 TCE JOY",
+   989→      "year": 2023,
+   990→      "price": 1099950,
+   991→      "currency": "TRY",
+   992→      "mileage_km": 104850,
+   993→      "fuel_type": "Benzin",
+   994→      "transmission": "Otomatik",
+   995→      "body_type": "Hatchback/5",
+   996→      "color": "Beyaz",
+   997→      "city": "Adana",
+   998→      "seller_type": "Galeriden",
+   999→      "image_url": "https://arbstorage.mncdn.com/...",
+  1000→      "images": ["https://arbstorage.mncdn.com/...", "..."],
+  1001→      "description": "2023 RENAULT CLİO ...",
+  1002→      "scraped_at": "2026-06-20T10:30:15.000Z"
+  1003→    }
+  1004→  ]
+  1005→}
+  1006→
+  1007→================================================================================
+  1008→                    SORUN GİDERME
+  1009→================================================================================
+  1010→
+  1011→| Sorun | Çözüm |
+  1012→|-------|-------|
+  1013→| 403 Forbidden | --headless=false ile dene |
+  1014→| Cloudflare | Görünür modda manuel doğrulama yap |
+  1015→| İlan bulunamadı | Selector'lar güncellenmiş, kontrol et |
+  1016→| Sayfa yüklenmiyor | --headless=false dene, bekleme sürelerini artır |
+  1017→| DNS çözülemiyor | VPN veya proxy dene |
+  1018→
+  1019→================================================================================
