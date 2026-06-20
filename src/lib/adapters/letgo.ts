@@ -24,10 +24,12 @@ export class LetgoAdapter extends BaseAdapter {
 
   /**
    * Letgo alt kategorileri — her biri farklı ilan seti döndürür.
-   * Ana sayfa + 6 alt kategori = ~150+ unique ilan.
+   * Alt kategoriler (sedan, hatchback vb.) genelde yedek parça içerir,
+   * bu yüzden "year > 0" filtresi parçaları eler ve sadece gerçek araçları alır.
+   * 7 kategori = 26 unique gerçek araç ilanı.
    */
   private readonly CATEGORY_PATHS = [
-    '/arabalar_c15706',           // Ana kategori
+    '/arabalar_c15706',           // Ana kategori (26 listings, hepsi gerçek araç)
     '/otomobil-suv_c15711',       // SUV
     '/sedan-araba_c15712',        // Sedan
     '/hatchback-araba_c15713',    // Hatchback
