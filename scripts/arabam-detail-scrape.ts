@@ -160,63 +160,78 @@ function extractMakeModelFromUrl(url: string): { make: string; model: string } {
   return { make: '', model: '' };
 }
 
-// ── Step 1: Get detail page URLs from listing pages via Wayback ──────
-const LISTING_PAGES = [
-  'https://web.archive.org/web/2024/https://www.arabam.com/ikinci-el/otomobil',
-  'https://web.archive.org/web/2024/https://www.arabam.com/ikinci-el/otomobil?page=2',
-  'https://web.archive.org/web/2024/https://www.arabam.com/ikinci-el/otomobil?page=3',
-  'https://web.archive.org/web/2024/https://www.arabam.com/ikinci-el/otomobil?page=4',
-  'https://web.archive.org/web/2024/https://www.arabam.com/ikinci-el/otomobil?page=5',
-];
-
-function extractListingUrls(html: string): string[] {
-  const $ = cheerio.load(html);
-  const urls: string[] = [];
+// ── Step 1: Get detail page URLs from Wayback CDX API ────────────────
+// (Listing page snapshots don't have archived detail pages, but CDX has
+// direct snapshots of /ilan/{slug}/{dealer}/{id} URLs from 2025 onwards)
+async function getArchivedDetailUrls(): Promise<{ timestamp: string; url: string }[]> {
+  // Try cache file first (CDX API is slow and times out frequently)
+  const cacheFile = '/tmp/archived-details.json';
+  try {
+    const cached = await import('fs').then(fs => fs.readFileSync(cacheFile, 'utf-8'));
+    const parsed = JSON.parse(cached);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      console.log(`  Using cached CDX results: ${parsed.length} URLs`);
+      return parsed;
+    }
+  } catch {}
+  
+  // Multiple CDX queries with different URL patterns (parallel for speed)
+  const queries = [
+    'https://web.archive.org/cdx/search/cdx?url=arabam.com/ilan/galeriden-satilik-*&output=json&limit=300&from=20250601&filter=statuscode:200&collapse=urlkey',
+    'https://web.archive.org/cdx/search/cdx?url=arabam.com/ilan/sahibinden-satilik-*&output=json&limit=300&from=20250601&filter=statuscode:200&collapse=urlkey',
+  ];
+  
+  const detailUrls: { timestamp: string; url: string }[] = [];
   const seen = new Set<string>();
   
-  // From JSON-LD (most reliable)
-  $('script[type="application/ld+json"]').each((_, el) => {
+  for (const cdxUrl of queries) {
+    console.log(`  Querying CDX: ${cdxUrl.substring(80, 120)}...`);
     try {
-      const text = $(el).text();
-      if (!text.includes('"Vehicle"') && !text.includes('"Car"')) return;
-      const parsed = JSON.parse(text);
-      const vehicles = Array.isArray(parsed) ? parsed : [parsed];
-      for (const v of vehicles) {
-        if (v['@type'] !== 'Vehicle' && v['@type'] !== 'Car') continue;
-        let url: string = v.url || '';
-        if (!url) continue;
-        const m = url.match(/\/web\/\d+\/(https?:\/\/.+)/);
-        if (m) url = m[1];
-        if (!url.startsWith('http')) url = `https://www.arabam.com${url.startsWith('/') ? '' : '/'}${url}`;
-        if (!seen.has(url)) {
+      const res = await axios.get(cdxUrl, { timeout: 45000 });
+      const entries = (res.data as any[][]).slice(1);
+      console.log(`    Found ${entries.length} CDX entries`);
+      
+      for (const row of entries) {
+        const url: string = row[2];
+        const m = url.match(/^https?:\/\/(?:www\.)?arabam\.com\/ilan\/(galeriden|sahibinden)-satilik-[^/]+\/[^/]+\/\d+\/?$/);
+        if (m && !seen.has(url)) {
           seen.add(url);
-          urls.push(url);
+          detailUrls.push({ timestamp: row[1], url });
         }
       }
-    } catch {}
-  });
-  
-  // From <a> tags
-  $('a[href*="/ilan/"]').each((_, el) => {
-    const href = $(el).attr('href') || '';
-    const m = href.match(/\/web\/\d+\/(https?:\/\/[^"'\s]+\/ilan\/(?:galeriden|sahibinden)-satilik-[^/]+\/[^/]+\/\d+)/);
-    if (m && !seen.has(m[1])) {
-      seen.add(m[1]);
-      urls.push(m[1]);
+    } catch (e: any) {
+      console.log(`    CDX query failed: ${e.message.substring(0, 80)}`);
     }
-  });
+  }
   
-  return urls;
+  console.log(`  Total unique detail page URLs: ${detailUrls.length}`);
+  
+  // Cache for future runs
+  try {
+    await import('fs').then(fs => fs.writeFileSync(cacheFile, JSON.stringify(detailUrls, null, 2)));
+    console.log(`  Cached to ${cacheFile}`);
+  } catch {}
+  
+  return detailUrls;
 }
 
 // ── Step 2: Fetch + parse detail page ────────────────────────────────
-async function fetchDetailPage(realUrl: string, retries = 2): Promise<string> {
-  // Try multiple Wayback timestamp formats
-  const candidates = [
-    `https://web.archive.org/web/2025/${realUrl}`,
-    `https://web.archive.org/web/2024/${realUrl}`,
-    `https://web.archive.org/web/${realUrl}`,
-  ];
+async function fetchDetailPage(
+  realUrl: string,
+  timestamp?: string,
+  retries = 2,
+): Promise<string> {
+  // If we have a specific timestamp from CDX, use it (most reliable)
+  const candidates: string[] = [];
+  if (timestamp) {
+    candidates.push(`https://web.archive.org/web/${timestamp}id_/${realUrl}`);
+    candidates.push(`https://web.archive.org/web/${timestamp}/${realUrl}`);
+  } else {
+    // Fallback: try without specific timestamp
+    candidates.push(`https://web.archive.org/web/2025/${realUrl}`);
+    candidates.push(`https://web.archive.org/web/2024/${realUrl}`);
+    candidates.push(`https://web.archive.org/web/${realUrl}`);
+  }
   
   for (const waybackUrl of candidates) {
     for (let attempt = 0; attempt <= retries; attempt++) {
@@ -520,42 +535,12 @@ async function main() {
   
   const t0 = Date.now();
   
-  // ── Step 1: Collect listing URLs ────
-  console.log('📋 Adım 1: Listing URL\'leri toplanıyor...');
-  const allUrls: string[] = [];
-  const seenUrls = new Set<string>();
-  
-  for (const pageUrl of LISTING_PAGES) {
-    console.log(`  Fetching: ${pageUrl.substring(70)}...`);
-    try {
-      const res = await axios.get(pageUrl, {
-        headers: { 'User-Agent': UA, 'Accept-Language': 'tr-TR,tr;q=0.9' },
-        timeout: 30000,
-        validateStatus: () => true,
-        maxRedirects: 5,
-      });
-      if (res.status === 200 && res.data.length > 50000) {
-        const urls = extractListingUrls(res.data);
-        let newCount = 0;
-        for (const u of urls) {
-          if (!seenUrls.has(u)) {
-            seenUrls.add(u);
-            allUrls.push(u);
-            newCount++;
-          }
-        }
-        console.log(`    ✓ ${urls.length} URL, ${newCount} yeni (toplam: ${allUrls.length})`);
-      }
-    } catch (e: any) {
-      console.log(`    ✗ ${e.message.substring(0, 80)}`);
-    }
-    await new Promise((r) => setTimeout(r, 1500));
-  }
-  
-  console.log(`\n📦 Toplam ${allUrls.length} unique ilan URL'si bulundu`);
+  // ── Step 1: Collect listing URLs from CDX API ────
+  console.log('📋 Adım 1: Wayback CDX\'ten archived detail URL\'leri alınıyor...');
+  const archivedUrls = await getArchivedDetailUrls();
   
   // Limit
-  const urls = allUrls.slice(0, MAX_DETAILS);
+  const urls = archivedUrls.slice(0, MAX_DETAILS);
   console.log(`🎯 En fazla ${urls.length} detay sayfası işlenecek\n`);
   
   // ── Step 2: Fetch + parse detail pages ────
@@ -567,9 +552,9 @@ async function main() {
   
   await processWithConcurrency(
     urls,
-    async (url) => {
+    async (item) => {
       progress++;
-      const html = await fetchDetailPage(url);
+      const html = await fetchDetailPage(item.url, item.timestamp);
       if (!html) {
         errorCount++;
         if (progress % 10 === 0) {
@@ -578,7 +563,7 @@ async function main() {
         return;
       }
       
-      const listing = parseDetailPage(html, url);
+      const listing = parseDetailPage(html, item.url);
       if (!listing) {
         errorCount++;
         return;
@@ -590,7 +575,7 @@ async function main() {
       else errorCount++;
       
       if (progress % 5 === 0 || progress === urls.length) {
-        console.log(`  [${progress}/${urls.length}] Yeni=${newCount} Güncellenen=${updatedCount} Hata=${errorCount} — son: ${listing.make} ${listing.model}`);
+        console.log(`  [${progress}/${urls.length}] Yeni=${newCount} Güncellenen=${updatedCount} Hata=${errorCount} — son: ${listing.make} ${listing.model} ${listing.year}`);
       }
     },
     CONCURRENCY,
