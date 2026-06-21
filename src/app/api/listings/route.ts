@@ -2,27 +2,62 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { cache } from '@/lib/services/cache';
 import { SearchFilters, SearchResult, ListingWithScore, SearchAggregations } from '@/lib/types';
+import { listingsQuerySchema, safeParse, type ListingsQuery } from '@/lib/validation/schemas';
 
-// ── Helper: Parse query params into SearchFilters ──────────────────────
+// ── Helper: Parse query params with Zod ────────────────────────────────
+//
+// Replaces the old per-field Number(...) coercion that leaked NaN into
+// Prisma queries. Invalid params are silently dropped (treated as undefined).
 
 function parseFilters(searchParams: URLSearchParams): SearchFilters {
+  // Build a plain object from URLSearchParams (first value per key).
+  const raw: Record<string, string> = {};
+  for (const key of searchParams.keys()) {
+    const value = searchParams.get(key);
+    if (value !== null) raw[key] = value;
+  }
+
+  const parsed: ListingsQuery = safeParse(
+    listingsQuerySchema,
+    raw,
+    {
+      make: undefined,
+      model: undefined,
+      yearMin: undefined,
+      yearMax: undefined,
+      priceMin: undefined,
+      priceMax: undefined,
+      mileageMax: undefined,
+      fuelType: undefined,
+      transmission: undefined,
+      bodyType: undefined,
+      city: undefined,
+      sellerType: undefined,
+      dealTag: undefined,
+      sortBy: 'newest',
+      page: 1,
+      limit: 20,
+    } as ListingsQuery,
+    'listingsQuery',
+  );
+
   return {
-    make: searchParams.get('make') || undefined,
-    model: searchParams.get('model') || undefined,
-    yearMin: searchParams.get('yearMin') ? Number(searchParams.get('yearMin')) : undefined,
-    yearMax: searchParams.get('yearMax') ? Number(searchParams.get('yearMax')) : undefined,
-    priceMin: searchParams.get('priceMin') ? Number(searchParams.get('priceMin')) : undefined,
-    priceMax: searchParams.get('priceMax') ? Number(searchParams.get('priceMax')) : undefined,
-    mileageMax: searchParams.get('mileageMax') ? Number(searchParams.get('mileageMax')) : undefined,
-    fuelType: searchParams.get('fuelType') || undefined,
-    transmission: searchParams.get('transmission') || undefined,
-    bodyType: searchParams.get('bodyType') || undefined,
-    city: searchParams.get('city') || undefined,
-    sellerType: searchParams.get('sellerType') || undefined,
-    dealTag: searchParams.get('dealTag') || undefined,
-    sortBy: (searchParams.get('sortBy') as SearchFilters['sortBy']) || 'newest',
-    page: searchParams.get('page') ? Number(searchParams.get('page')) : 1,
-    limit: searchParams.get('limit') ? Number(searchParams.get('limit')) : 20,
+    make: parsed.make,
+    model: parsed.model,
+    yearMin: parsed.yearMin,
+    yearMax: parsed.yearMax,
+    priceMin: parsed.priceMin,
+    priceMax: parsed.priceMax,
+    mileageMax: parsed.mileageMax,
+    fuelType: parsed.fuelType,
+    transmission: parsed.transmission,
+    bodyType: parsed.bodyType,
+    city: parsed.city,
+    sellerType: parsed.sellerType,
+    dealTag: parsed.dealTag,
+    sortBy: parsed.sortBy as SearchFilters['sortBy'],
+    page: parsed.page,
+    limit: parsed.limit,
   };
 }
 

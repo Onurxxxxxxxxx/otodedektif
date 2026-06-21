@@ -1,13 +1,29 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { cache } from '@/lib/services/cache';
+import { suggestionsQuerySchema, safeParse } from '@/lib/validation/schemas';
 
 // ── GET Handler ────────────────────────────────────────────────────────
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const q = searchParams.get('q')?.trim().toLowerCase() || '';
+
+    // Build a plain object for Zod
+    const raw: Record<string, string> = {};
+    for (const key of searchParams.keys()) {
+      const value = searchParams.get(key);
+      if (value !== null) raw[key] = value;
+    }
+
+    const parsed = safeParse(
+      suggestionsQuerySchema,
+      raw,
+      { q: '' },
+      'suggestionsQuery',
+    );
+
+    const q = (parsed.q || '').trim().toLowerCase();
 
     if (!q || q.length < 1) {
       return NextResponse.json({ makes: [], models: [] });

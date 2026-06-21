@@ -5,24 +5,25 @@ import { estimateAllCosts } from '@/lib/services/cost-estimator';
 import { runDeduplication } from '@/lib/services/deduplicator';
 import { cache } from '@/lib/services/cache';
 import type { SearchFilters } from '@/lib/types';
+import { scrapeBodySchema, safeParse } from '@/lib/validation/schemas';
 
 // ── POST Handler ───────────────────────────────────────────────────────
 
 /**
  * Trigger scraping pipeline.
  *
- * Body (optional):
+ * Body (optional, validated with Zod):
  *   sourceName?: string   — scrape a single source only
  *   filters?: SearchFilters — pass search filters to adapters
  *
- * CRITICAL: This is the ONLY endpoint that triggers scraping.
- * Never scrape on GET /search or GET /listing/{id}.
+ * Auth: protected by middleware (ADMIN_TOKEN bearer).
  */
 export async function POST(request: Request) {
   try {
-    const body = await request.json().catch(() => ({}));
+    const rawBody = await request.json().catch(() => ({}));
+    const body = safeParse(scrapeBodySchema, rawBody, {}, 'scrapeBody');
     const sourceName: string | undefined = body.sourceName;
-    const filters: SearchFilters | undefined = body.filters;
+    const filters: SearchFilters | undefined = body.filters as SearchFilters | undefined;
 
     let scrapeResults;
 

@@ -106,10 +106,38 @@ export default function Home() {
       if (f.limit) params.set('limit', f.limit.toString())
 
       const res = await fetch(`/api/listings?${params.toString()}`)
-      const data: SearchResult = await res.json()
-      setResults(data)
-      if (data.aggregations) {
-        setAggregations(data.aggregations)
+      if (!res.ok) {
+        console.error('Listings API returned non-OK status:', res.status)
+        setResults({
+          listings: [],
+          total: 0,
+          page: f.page || 1,
+          limit: f.limit || 20,
+          totalPages: 0,
+          aggregations: {
+            makes: [], cities: [], fuelTypes: [], transmissions: [],
+            bodyTypes: [],
+            priceRange: { min: 0, max: 0 },
+            yearRange: { min: 0, max: 0 },
+            totalActive: 0,
+            dealBreakdown: [],
+          },
+        })
+        return
+      }
+      const data = await res.json() as SearchResult
+      // Defensive: API bozuk yanıt dönerse (missing fields) default'la
+      const safeData: SearchResult = {
+        listings: Array.isArray(data?.listings) ? data.listings : [],
+        total: typeof data?.total === 'number' ? data.total : 0,
+        page: typeof data?.page === 'number' ? data.page : (f.page || 1),
+        limit: typeof data?.limit === 'number' ? data.limit : (f.limit || 20),
+        totalPages: typeof data?.totalPages === 'number' ? data.totalPages : 0,
+        aggregations: data?.aggregations ?? null,
+      }
+      setResults(safeData)
+      if (safeData.aggregations) {
+        setAggregations(safeData.aggregations)
       }
     } catch (err) {
       console.error('Failed to fetch listings:', err)

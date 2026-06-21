@@ -6,6 +6,10 @@ import { estimateAllCosts } from '@/lib/services/cost-estimator';
 import { runDeduplication } from '@/lib/services/deduplicator';
 import { cache } from '@/lib/services/cache';
 import { db } from '@/lib/db';
+import {
+  scrapePlaywrightBodySchema,
+  SCRAPE_PLAYWRIGHT_SITES,
+} from '@/lib/validation/schemas';
 
 export const dynamic = 'force-dynamic';
 export const maxDurationSeconds = 300;
@@ -13,22 +17,43 @@ export const maxDurationSeconds = 300;
 /**
  * POST /api/admin/scrape-playwright
  *
- * Body (optional):
- *   site?: 'arabam' | 'vavacars' | 'sahibinden' | 'all'   (default: 'all')
- *   pages?: number                                          (default: 2)
- *   max?: number                                            (default: 200)
+ * Body (validated STRICTLY with Zod — invalid input returns 400):
+ *   site?: enum('arabam' | 'vavacars' | 'sahibinden' | 'all')  (default: 'all')
+ *   pages?: number  (1..50, default: 2)
+ *   max?: number    (1..2000, default: 200)
  *
  * Triggers the Playwright-based scraper for SPA/WAF-protected sites.
- * Does NOT touch Letgo data — Letgo runs through its own adapter.
+ * Auth: protected by middleware (ADMIN_TOKEN bearer).
  *
- * Letgo verisi bu endpoint'ten etkilenmez. Aynı DB'ye farklı sourceName
- * ile yeni kayıtlar eklenir (UPSERT anahtarı: sourceUrl).
+ * SECURITY: Unlike other admin endpoints, this one uses STRICT validation
+ * (not safeParse) because the parameters are passed to spawn(). Invalid
+ * input is rejected with 400, not silently defaulted.
  */
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => ({}));
-  const site: string = body.site || 'all';
-  const pages: number = Number(body.pages) || 2;
-  const max: number = Number(body.max) || 200;
+  const rawBody = await request.json().catch(() => ({}));
+  const parseResult = scrapePlaywrightBodySchema.safeParse(rawBody);
+
+  if (!parseResult.success) {
+    return NextResponse.json(
+      {
+        error: 'Invalid request body',
+        details: parseResult.error.issues,
+      },
+      { status: 400 },
+    );
+  }
+
+  const { site, pages, max } = parseResult.data;
+
+  // Runtime assertion that site is in the closed enum (defense in depth,
+  // Zod already enforces this, but spawn() is sensitive enough to warrant
+  // a second check).
+  if (!SCRAPE_PLAYWRIGHT_SITES.includes(site)) {
+    return NextResponse.json(
+      { error: 'Invalid site parameter' },
+      { status: 400 },
+    );
+  }
 
   const scriptPath = path.join(process.cwd(), 'scripts', 'playwright-scrape.ts');
   const args = ['run', scriptPath, `--site=${site}`, `--pages=${pages}`, `--max=${max}`];
