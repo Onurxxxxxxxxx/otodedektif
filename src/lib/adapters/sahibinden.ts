@@ -1,4 +1,4 @@
-import { BaseAdapter, generateMockListings, type SearchFilters, type AdapterResult, type ListingRaw } from './base';
+import { BaseAdapter, type SearchFilters, type AdapterResult, type ListingRaw } from './base';
 import { RateLimiter, getRateLimiter } from '@/lib/utils/rate-limiter';
 import { TURKISH_MAKES, MAKE_MODELS } from '@/lib/constants';
 import * as cheerio from 'cheerio';
@@ -202,16 +202,7 @@ export class SahibindenAdapter extends BaseAdapter {
   // ── Fallback with mock data ──────────────────────────────────────
 
   async scrapeFallback(): Promise<ListingRaw[]> {
-    this.log('Using mock fallback data');
-    return generateMockListings({
-      sourceName: this.sourceName,
-      baseUrl: this.baseUrl,
-      count: 80,
-      priceMultiplier: 1,
-      sellerTypes: ['Sahibinden', 'Sahibinden', 'Galeri', 'Yetkili Bayi'],
-      descriptionTemplate: (make, model, year, city) =>
-        `${year} ${make} ${model} ${city}'da sahibinden satılık. Araç bakımlı, boyasız, değişensiz. Detaylı bilgi için arayın.`,
-    });
+    return [];
   }
 
   // ═══════════════════════════════════════════════════════════════════
